@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: triage
+  namespace: kube-book
+  labels:
+    app: triage-demo
+spec:
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: reader
+      image: busybox:1.36.1
+      command:
+        - sleep
+        - '86400'
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+    - name: clock
+      image: busybox:1.36.1
+      command:
+        - sleep
+        - '86400'
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+    - name: writer
+      image: busybox:1.36.1
+      command:
+        - sh
+        - -c
+        - 'echo ''writer: input file missing'' >&2; exit 1'
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL

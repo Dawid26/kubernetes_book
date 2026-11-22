@@ -1,0 +1,83 @@
+name: Exercise the workshop
+on:
+  workflow_dispatch:
+  push:
+    paths: ['labs/**', '.github/workflows/workshop.yml']
+permissions:
+  contents: read
+jobs:
+  workshop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: helm/kind-action@v1.12.0
+        with:
+          version: v0.33.0
+          kubectl_version: v1.36.4
+          node_image: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+          wait: 150s
+      - name: Follow a request through a release, a selector failure and a rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          k() { kubectl -n kube-book "$@"; }
+          read_page() { k exec client -- wget -qO- -T 3 http://status-web/; }
+          expect_page() {
+            for attempt in {1..30}; do
+              if [[ "$(read_page)" == "$1" ]]; then return 0; fi
+              sleep 2
+            done
+            return 1
+          }
+          kubectl apply -f labs/namespace.yaml
+          kubectl apply -k labs/base
+          kubectl apply -f labs/extras/client.yaml
+          k wait --for=condition=Ready pod/client --timeout=150s
+          k rollout status deploy/status-web --timeout=150s
+          expect_page 'Status v1'
+          kubectl apply -k labs/release
+          k rollout status deploy/status-web --timeout=150s
+          expect_page 'Status v2'
+          kubectl apply -f labs/extras/incident-service.yaml
+          for attempt in {1..20}; do
+            addresses=$(k get endpointslice -l kubernetes.io/service-name=status-web -o jsonpath='{.items[*].endpoints[*].addresses}')
+            [[ -z "$addresses" ]] && break
+            sleep 1
+          done
+          test -z "$addresses"
+          kubectl apply -f labs/base/service.yaml
+          expect_page 'Status v2'
+          k rollout undo deploy/status-web
+          k rollout status deploy/status-web --timeout=150s
+          expect_page 'Status v1'
+      - name: Check the reporting job, permissions and persistent data
+        shell: bash
+        run: |
+          set -euo pipefail
+          k() { kubectl -n kube-book "$@"; }
+          kubectl apply -f labs/extras/batch.yaml
+          k create job page-check-once --from=cronjob/page-check
+          k wait --for=condition=complete job/page-check-once --timeout=120s
+          k logs job/page-check-once | grep -Fx 'Status v1'
+          kubectl apply -f labs/extras/reader.yaml
+          k auth can-i list pods --as=system:serviceaccount:kube-book:reader
+          if k auth can-i get secrets --as=system:serviceaccount:kube-book:reader; then exit 1; fi
+          kubectl apply -f labs/extras/claim.yaml -f labs/extras/notebook.yaml
+          k wait --for=condition=Ready pod/notebook --timeout=150s
+          k exec notebook -- sh -c 'echo first > /data/note'
+          k delete pod notebook --wait=true
+          kubectl apply -f labs/extras/notebook.yaml
+          k wait --for=condition=Ready pod/notebook --timeout=150s
+          test "$(k exec notebook -- cat /data/note)" = first
+          kubectl apply -f labs/extras/ledger.yaml
+          k rollout status statefulset/ledger --timeout=180s
+          k exec ledger-0 -- sh -c 'echo member-zero > /data/note'
+          k delete pod ledger-0 --wait=true
+          k rollout status statefulset/ledger --timeout=180s
+          test "$(k exec ledger-0 -- cat /data/note)" = member-zero
+      - name: Show diagnostic state if an exercise fails
+        if: failure()
+        run: |
+          kubectl -n kube-book get pods,svc,pvc -o wide
+          kubectl -n kube-book get events --sort-by=.metadata.creationTimestamp

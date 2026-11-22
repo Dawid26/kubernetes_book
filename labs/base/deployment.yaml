@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: status-web
+  namespace: kube-book
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: status-web
+  template:
+    metadata:
+      labels:
+        app: status-web
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: busybox:1.36.1
+          command:
+            - httpd
+            - -f
+            - -vv
+            - -p
+            - '8080'
+            - -h
+            - /www
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: content
+              mountPath: /www
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 2
+            failureThreshold: 15
+          readinessProbe:
+            httpGet:
+              path: /ready.txt
+              port: http
+            periodSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+      volumes:
+        - name: content
+          configMap:
+            name: status-content-v1

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: status-content-v1
+  namespace: kube-book
+immutable: true
+data:
+  index.html: 'Status v1
+
+    '
+  ready.txt: 'ready
+
+    '

@@ -1,0 +1,19 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: status-web
+  namespace: kube-book
+spec:
+  parentRefs:
+    - name: shared
+      namespace: gateway-system
+  hostnames:
+    - status.example.test
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: status-web
+          port: 80
